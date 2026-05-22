@@ -3,6 +3,36 @@ provider "aws" {
 }
 
 ############################
+# Utiliser le VPC par défaut EXISTANT (ne pas en créer un nouveau)
+############################
+data "aws_vpc" "default" {
+  default = true
+}
+
+############################
+# Récupérer les subnets publics du VPC par défaut
+############################
+data "aws_subnets" "public" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.default.id]
+  }
+  
+  filter {
+    name   = "map-public-ip-on-launch"
+    values = ["true"]
+  }
+}
+
+data "aws_subnet" "public_a" {
+  id = data.aws_subnets.public.ids[0]
+}
+
+data "aws_subnet" "public_b" {
+  id = data.aws_subnets.public.ids[1]
+}
+
+############################
 # Variables pour noms uniques
 ############################
 variable "suffix" {
@@ -11,106 +41,18 @@ variable "suffix" {
   default     = ""
 }
 
-# Générer un suffixe basé sur le timestamp si non fourni
 locals {
   resource_suffix = var.suffix != "" ? var.suffix : formatdate("YYYYMMDDhhmmss", timestamp())
-}
-
-############################
-# VPC
-############################
-resource "aws_vpc" "main" {
-  cidr_block           = "10.0.0.0/16"
-  enable_dns_support   = true
-  enable_dns_hostnames = true
-
-  tags = {
-    Name = "Main-VPC"
-  }
-}
-
-############################
-# Internet Gateway
-############################
-resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.main.id
-
-  tags = {
-    Name = "Main-IGW"
-  }
-}
-
-############################
-# Public Subnet A
-############################
-resource "aws_subnet" "public_subnet_a" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.1.0/24"
-  availability_zone       = "us-east-1a"
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "Public-Subnet-A"
-  }
-}
-
-############################
-# Public Subnet B
-############################
-resource "aws_subnet" "public_subnet_b" {
-  vpc_id                  = aws_vpc.main.id
-  cidr_block              = "10.0.2.0/24"
-  availability_zone       = "us-east-1b"
-  map_public_ip_on_launch = true
-
-  tags = {
-    Name = "Public-Subnet-B"
-  }
-}
-
-############################
-# Route Table Public
-############################
-resource "aws_route_table" "public_rt" {
-  vpc_id = aws_vpc.main.id
-
-  route {
-    cidr_block = "0.0.0.0/0"
-    gateway_id = aws_internet_gateway.igw.id
-  }
-
-  tags = {
-    Name = "Public-RT"
-  }
-}
-
-############################
-# Route Table Association A
-############################
-resource "aws_route_table_association" "public_assoc_a" {
-  subnet_id      = aws_subnet.public_subnet_a.id
-  route_table_id = aws_route_table.public_rt.id
-}
-
-############################
-# Route Table Association B
-############################
-resource "aws_route_table_association" "public_assoc_b" {
-  subnet_id      = aws_subnet.public_subnet_b.id
-  route_table_id = aws_route_table.public_rt.id
 }
 
 ############################
 # Security Group for ALB
 ############################
 resource "aws_security_group" "alb_sg" {
-  name        = "ALB-SG"
+  name        = "ALB-SG-${local.resource_suffix}"
   description = "Allow HTTP and HTTPS"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.default.id
 
-  ##########################
-  # HTTP
-  ##########################
   ingress {
     from_port   = 80
     to_port     = 80
@@ -118,9 +60,6 @@ resource "aws_security_group" "alb_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ##########################
-  # HTTPS
-  ##########################
   ingress {
     from_port   = 443
     to_port     = 443
@@ -128,9 +67,6 @@ resource "aws_security_group" "alb_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ##########################
-  # Outbound
-  ##########################
   egress {
     from_port   = 0
     to_port     = 0
@@ -149,11 +85,8 @@ resource "aws_security_group" "alb_sg" {
 resource "aws_security_group" "ec2_sg" {
   name        = "EC2-SG-${local.resource_suffix}"
   description = "Allow HTTP and SSH"
-  vpc_id      = aws_vpc.main.id
+  vpc_id      = data.aws_vpc.default.id
 
-  ##########################
-  # HTTP depuis ALB
-  ##########################
   ingress {
     from_port       = 80
     to_port         = 80
@@ -161,9 +94,6 @@ resource "aws_security_group" "ec2_sg" {
     security_groups = [aws_security_group.alb_sg.id]
   }
 
-  ##########################
-  # SSH pour Ansible
-  ##########################
   ingress {
     from_port   = 22
     to_port     = 22
@@ -171,9 +101,6 @@ resource "aws_security_group" "ec2_sg" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  ##########################
-  # Outbound
-  ##########################
   egress {
     from_port   = 0
     to_port     = 0
@@ -192,7 +119,7 @@ resource "aws_security_group" "ec2_sg" {
 resource "aws_instance" "web1" {
   ami                         = "ami-0c02fb55956c7d316"
   instance_type               = "t3.micro"
-  subnet_id                   = aws_subnet.public_subnet_a.id
+  subnet_id                   = data.aws_subnet.public_a.id
   associate_public_ip_address = true
 
   vpc_security_group_ids = [
@@ -212,7 +139,7 @@ resource "aws_instance" "web1" {
 resource "aws_instance" "web2" {
   ami                         = "ami-0c02fb55956c7d316"
   instance_type               = "t3.micro"
-  subnet_id                   = aws_subnet.public_subnet_b.id
+  subnet_id                   = data.aws_subnet.public_b.id
   associate_public_ip_address = true
 
   vpc_security_group_ids = [
@@ -227,7 +154,7 @@ resource "aws_instance" "web2" {
 }
 
 ############################
-# Application Load Balancer (CORRIGÉ - nom unique)
+# Application Load Balancer
 ############################
 resource "aws_lb" "alb" {
   name               = "web-alb-${local.resource_suffix}"
@@ -239,8 +166,8 @@ resource "aws_lb" "alb" {
   ]
 
   subnets = [
-    aws_subnet.public_subnet_a.id,
-    aws_subnet.public_subnet_b.id
+    data.aws_subnet.public_a.id,
+    data.aws_subnet.public_b.id
   ]
 
   tags = {
@@ -249,13 +176,13 @@ resource "aws_lb" "alb" {
 }
 
 ############################
-# Target Group (CORRIGÉ - nom unique)
+# Target Group
 ############################
 resource "aws_lb_target_group" "tg" {
   name     = "TG-WebApps-${local.resource_suffix}"
   port     = 80
   protocol = "HTTP"
-  vpc_id   = aws_vpc.main.id
+  vpc_id   = data.aws_vpc.default.id
 
   health_check {
     path                = "/"
@@ -308,9 +235,6 @@ resource "aws_sns_topic" "alerts" {
   name = "cpu-alerts-${local.resource_suffix}"
 }
 
-############################
-# Email Subscription
-############################
 resource "aws_sns_topic_subscription" "email_alert" {
   topic_arn = aws_sns_topic.alerts.arn
   protocol  = "email"
@@ -318,7 +242,7 @@ resource "aws_sns_topic_subscription" "email_alert" {
 }
 
 ############################
-# CloudWatch Alarm Web1
+# CloudWatch Alarms
 ############################
 resource "aws_cloudwatch_metric_alarm" "cpu_alarm_web1" {
   alarm_name          = "HighCPU-Web1-${local.resource_suffix}"
@@ -337,9 +261,6 @@ resource "aws_cloudwatch_metric_alarm" "cpu_alarm_web1" {
   alarm_actions = [aws_sns_topic.alerts.arn]
 }
 
-############################
-# CloudWatch Alarm Web2
-############################
 resource "aws_cloudwatch_metric_alarm" "cpu_alarm_web2" {
   alarm_name          = "HighCPU-Web2-${local.resource_suffix}"
   comparison_operator = "GreaterThanThreshold"
@@ -373,7 +294,7 @@ output "alb_dns_name" {
   description = "DNS name of the Application Load Balancer"
 }
 
-output "resource_suffix" {
-  value = local.resource_suffix
-  description = "Suffix unique utilisé pour les ressources"
+output "vpc_id" {
+  value = data.aws_vpc.default.id
+  description = "ID du VPC par défaut utilisé"
 }
