@@ -2,12 +2,14 @@
 - name: Deploy Docker, Docker Compose, Nginx, Node.js app and MongoDB
   hosts: all
   become: yes
-
+  gather_facts: yes
+  
+  # Force l'utilisation de Python3
   vars:
     app_dir: /opt/nodeapp
+    ansible_python_interpreter: /usr/bin/python3
 
   tasks:
-
     - name: Update apt packages
       apt:
         update_cache: yes
@@ -18,6 +20,13 @@
           - docker.io
           - docker-compose
           - npm
+          - python3
+          - python3-pip
+        state: present
+
+    - name: Install Docker SDK for Python
+      pip:
+        name: docker
         state: present
 
     - name: Start and enable Docker
@@ -29,6 +38,11 @@
     - name: Create application directory
       file:
         path: "{{ app_dir }}"
+        state: directory
+
+    - name: Create app subdirectory
+      file:
+        path: "{{ app_dir }}/app"
         state: directory
 
     - name: Install PM2 globally
@@ -43,18 +57,19 @@
           version: '3'
 
           services:
-
             nginx:
               image: nginx:latest
               container_name: nginx
               ports:
                 - "80:80"
+              restart: unless-stopped
 
             mongodb:
               image: mongo:latest
               container_name: mongodb
               ports:
                 - "27017:27017"
+              restart: unless-stopped
 
             nodeapp:
               image: node:18
@@ -64,26 +79,33 @@
                 - ./app:/app
               command: >
                 sh -c "npm install &&
-                       npm install -g pm2 &&
-                       pm2-runtime app.js"
+                       npx pm2-runtime app.js"
               ports:
                 - "3000:3000"
+              restart: unless-stopped
 
     - name: Create sample Node.js application
       copy:
         dest: "{{ app_dir }}/app/app.js"
         content: |
           const http = require('http');
+          const os = require('os');
 
           const server = http.createServer((req, res) => {
-              res.writeHead(200, {'Content-Type': 'text/plain'});
-              res.end('E-Commerce Store
-            - Laptop $1200
-             - Phone $800');
+              res.writeHead(200, {'Content-Type': 'text/html'});
+              res.write('<h1>E-Commerce Store</h1>');
+              res.write('<ul>');
+              res.write('<li>Laptop - $1200</li>');
+              res.write('<li>Phone - $800</li>');
+              res.write('<li>Tablet - $500</li>');
+              res.write('</ul>');
+              res.write(`<p>Host: ${os.hostname()}</p>`);
+              res.end();
           });
 
-          server.listen(3000, () => {
-              console.log('Server running on port 3000');
+          const PORT = 3000;
+          server.listen(PORT, '0.0.0.0', () => {
+              console.log(`Server running on port ${PORT}`);
           });
 
     - name: Create package.json
@@ -93,10 +115,25 @@
           {
             "name": "nodeapp",
             "version": "1.0.0",
-            "main": "app.js"
+            "main": "app.js",
+            "scripts": {
+              "start": "node app.js"
+            },
+            "dependencies": {}
           }
 
     - name: Run Docker Compose
       shell: |
         cd {{ app_dir }}
         docker-compose up -d
+      args:
+        executable: /bin/bash
+
+    - name: Check if containers are running
+      command: docker ps
+      register: docker_ps
+      changed_when: false
+
+    - name: Display running containers
+      debug:
+        msg: "{{ docker_ps.stdout_lines }}"
