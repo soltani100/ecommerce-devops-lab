@@ -349,9 +349,14 @@ resource "aws_cloudwatch_metric_alarm" "cpu_alarm_web2" {
 # Outputs
 ############################
 output "instance_public_ips" {
-value = aws_instance.web[*].public_ip
+  value = [
+    aws_instance.web1.public_ip,
+    aws_instance.web2.public_ip
+  ]
+  description = "Public IP addresses of the EC2 instances"
 }
 
 output "alb_dns_name" {
   value = aws_lb.alb.dns_name
+  description = "DNS name of the Application Load Balancer"
 }
