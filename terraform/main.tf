@@ -3,6 +3,20 @@ provider "aws" {
 }
 
 ############################
+# Variables pour noms uniques
+############################
+variable "suffix" {
+  description = "Suffix unique pour les ressources"
+  type        = string
+  default     = ""
+}
+
+# Générer un suffixe basé sur le timestamp si non fourni
+locals {
+  resource_suffix = var.suffix != "" ? var.suffix : formatdate("YYYYMMDDhhmmss", timestamp())
+}
+
+############################
 # VPC
 ############################
 resource "aws_vpc" "main" {
@@ -133,7 +147,7 @@ resource "aws_security_group" "alb_sg" {
 # Security Group for EC2
 ############################
 resource "aws_security_group" "ec2_sg" {
-  name        = "EC2-SG"
+  name        = "EC2-SG-${local.resource_suffix}"
   description = "Allow HTTP and SSH"
   vpc_id      = aws_vpc.main.id
 
@@ -154,8 +168,6 @@ resource "aws_security_group" "ec2_sg" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-
-    # Remplace par ton IP publique
     cidr_blocks = ["0.0.0.0/0"]
   }
 
@@ -215,10 +227,10 @@ resource "aws_instance" "web2" {
 }
 
 ############################
-# Application Load Balancer
+# Application Load Balancer (CORRIGÉ - nom unique)
 ############################
 resource "aws_lb" "alb" {
-  name               = "web-alb"
+  name               = "web-alb-${local.resource_suffix}"
   internal           = false
   load_balancer_type = "application"
 
@@ -237,10 +249,10 @@ resource "aws_lb" "alb" {
 }
 
 ############################
-# Target Group
+# Target Group (CORRIGÉ - nom unique)
 ############################
 resource "aws_lb_target_group" "tg" {
-  name     = "TG-WebApps"
+  name     = "TG-WebApps-${local.resource_suffix}"
   port     = 80
   protocol = "HTTP"
   vpc_id   = aws_vpc.main.id
@@ -293,7 +305,7 @@ resource "aws_lb_listener" "http" {
 # SNS Topic
 ############################
 resource "aws_sns_topic" "alerts" {
-  name = "cpu-alerts"
+  name = "cpu-alerts-${local.resource_suffix}"
 }
 
 ############################
@@ -309,7 +321,7 @@ resource "aws_sns_topic_subscription" "email_alert" {
 # CloudWatch Alarm Web1
 ############################
 resource "aws_cloudwatch_metric_alarm" "cpu_alarm_web1" {
-  alarm_name          = "HighCPU-Web1"
+  alarm_name          = "HighCPU-Web1-${local.resource_suffix}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "CPUUtilization"
@@ -329,7 +341,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_alarm_web1" {
 # CloudWatch Alarm Web2
 ############################
 resource "aws_cloudwatch_metric_alarm" "cpu_alarm_web2" {
-  alarm_name          = "HighCPU-Web2"
+  alarm_name          = "HighCPU-Web2-${local.resource_suffix}"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "CPUUtilization"
@@ -359,4 +371,9 @@ output "instance_public_ips" {
 output "alb_dns_name" {
   value = aws_lb.alb.dns_name
   description = "DNS name of the Application Load Balancer"
+}
+
+output "resource_suffix" {
+  value = local.resource_suffix
+  description = "Suffix unique utilisé pour les ressources"
 }
