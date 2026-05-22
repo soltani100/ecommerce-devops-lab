@@ -1,85 +1,110 @@
 name: Full DevOps Pipeline
-on:
-push:
-branches: [ "main" ]
-jobs:
-# =====================================
-# 1. TERRAFORM INFRASTRUCTURE
-# =====================================
-terraform:
-name: Provision Infrastructure
-runs-on: ubuntu-latest
-defaults:
-run:
-working-directory: terraform
-outputs:
-instance_ips: ${{ steps.export.outputs.instance_ips }}
-steps:
-- name: Checkout Code
-uses: actions/checkout@v3
-- name: Configure AWS Credentials
-uses: aws-actions/configure-aws-credentials@v2
-with:
-aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-region: ${{ secrets.AWS_REGION }}
-- name: Setup Terraform
-uses: hashicorp/setup-terraform@v3
-- name: Terraform Init
-run: terraform init
-- name: Terraform Validate
-run: terraform validate
-- name: Terraform Plan
-run: terraform plan -out=tfplan
-- name: Terraform Apply
-run: terraform apply -auto-approve tfplan
-- name: Export Instance IPs
-id: export
-run: |
-IPS=$(terraform output -json instance_public_ips | jq -r '.[]' | tr '\n' ',' )
-echo "instance_ips=$IPS" >> $GITHUB_OUTPUT
-# =====================================
-# 2. ANSIBLE CONFIGURATION
-# =====================================
-ansible:
-name: Configure Servers
-runs-on: ubuntu-latest
-needs: terraform
-steps:
-- name: Checkout
-uses: actions/checkout@v3
-- name: Install Ansible
-run: |
-sudo apt update
-sudo apt install -y ansible jq
-- name: Setup SSH Key
-run: |
-echo "${{ secrets.EC2_KEY }}" > /home/soltani/ecommerce-devops-lab/mykey.pem
-chmod 600 /home/soltani/ecommerce-devops-lab/mykey.pem
-- name: Generate Inventory
-run: |
-echo "[web]" > inventory.ini
-for ip in $(echo "${{ needs.terraform.outputs.instance_ips }}" | tr ',' ' '); do
-echo "$ip ansible_user=ec2-user ansible_ssh_private_key_file=/home/soltani/ecommerce-devops-lab/mykey.pem" >> inventory.ini
-done
-- name: Run Ansible Deployment
-run: |
-ansible-playbook -i inventory.ini ansible/deploy.yml
-env:
-ANSIBLE_HOST_KEY_CHECKING: "False"
-# =====================================
-# 3. OPTIONAL: TERRAFORM DESTROY
-# =====================================
-destroy:
-name: Destroy Infrastructure (Manual)
-if: github.event_name == 'workflow_dispatch'
-runs-on: ubuntu-latest
-defaults:
-run:
-working-directory: terraform
-steps:
-- uses: actions/checkout@v3
-- uses: hashicorp/setup-terraform@v3
-- name: Terraform Destroy
-run: terraform destroy -auto-approve
 
+on:
+  push:
+    branches:
+      - "main"
+
+jobs:
+
+  #####################################
+  # 1. TERRAFORM
+  #####################################
+  terraform:
+    name: Provision Infrastructure
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    outputs:
+      instance_ips: ${{ steps.export.outputs.instance_ips }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Export Instance IPs
+        id: export
+        run: |
+          IPS=$(terraform output -json instance_public_ips | jq -r '.[]' | tr '\n' ',')
+          echo "instance_ips=$IPS" >> $GITHUB_OUTPUT
+
+  #####################################
+  # 2. ANSIBLE
+  #####################################
+  ansible:
+    name: Configure Servers
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Ansible
+        run: |
+          sudo apt update
+          sudo apt install -y ansible jq
+
+      - name: Setup SSH Key
+        run: |
+          echo "${{ secrets.EC2_KEY }}" > mykey.pem
+          chmod 600 mykey.pem
+
+      - name: Generate Inventory
+        run: |
+          echo "[web]" > inventory.ini
+
+          for ip in $(echo "${{ needs.terraform.outputs.instance_ips }}" | tr ',' ' '); do
+            echo "$ip ansible_user=ec2-user ansible_ssh_private_key_file=mykey.pem" >> inventory.ini
+          done
+
+      - name: Run Ansible Deployment
+        run: |
+          ansible-playbook -i inventory.ini ansible/deploy.yml
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+
+  #####################################
+  # 3. DESTROY
+  #####################################
+  destroy:
+    name: Destroy Infrastructure
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve
