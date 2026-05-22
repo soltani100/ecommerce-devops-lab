@@ -37,7 +37,7 @@
       apt:
         name:
           - docker.io
-          - docker-compose
+          - docker-compose-v2
           - npm
           - python3
           - python3-pip
@@ -124,9 +124,7 @@
         content: |
           const http = require('http');
           const os = require('os');
-          const mongoose = require('mongoose');
 
-          // Simple HTTP server
           const server = http.createServer((req, res) => {
               res.writeHead(200, {'Content-Type': 'text/html'});
               res.write('<h1>E-Commerce Store</h1>');
@@ -159,30 +157,17 @@
               "start": "node app.js",
               "dev": "nodemon app.js"
             },
-            "dependencies": {
-              "express": "^4.18.2"
-            }
+            "dependencies": {}
           }
         mode: '0644'
 
-    - name: Create package-lock.json (empty to avoid warnings)
-      copy:
-        dest: "{{ app_dir }}/app/package-lock.json"
-        content: |
-          {
-            "name": "nodeapp",
-            "version": "1.0.0",
-            "lockfileVersion": 2
-          }
-        mode: '0644'
-
-    - name: Run Docker Compose
-      docker_compose:
+    - name: Run Docker Compose with v2 (CORRECTED)
+      community.docker.docker_compose_v2:
         project_src: "{{ app_dir }}"
         files:
           - docker-compose.yml
         state: present
-        restarted: yes
+        pull: always
       register: compose_output
 
     - name: Display compose output
@@ -216,12 +201,6 @@
     - name: Display nginx status
       debug:
         msg: "Nginx is {{ 'accessible' if nginx_check.status == 200 else 'not accessible' }}"
-
-    - name: Get ALB DNS name (if running on AWS)
-      command: curl -s http://169.254.169.254/latest/meta-data/public-hostname
-      register: alb_dns
-      ignore_errors: yes
-      when: ansible_ec2_metadata is defined
 
     - name: Display access information
       debug:
